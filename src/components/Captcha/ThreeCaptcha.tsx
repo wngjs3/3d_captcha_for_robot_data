@@ -286,7 +286,7 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
 
   // Replay frame
   const replayFrame = () => {
-    if (!isReplaying || !robotArmRef.current || !objectsRef.current) return;
+    if (!isReplayingRef.current || !robotArmRef.current || !objectsRef.current) return;
 
     const currentTime = performance.now() - replayStartTimeRef.current;
     const frame = recordingDataRef.current.find(f => f.timestamp >= currentTime);
