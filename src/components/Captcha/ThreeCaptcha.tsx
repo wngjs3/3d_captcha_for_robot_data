@@ -187,6 +187,33 @@ const ApiKeyInput = styled.input`
   }
 `;
 
+const VerificationResult = styled.div<{ $result: 'success' | 'failed' }>`
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  animation: fadeIn 0.3s ease-in-out;
+  
+  ${props => props.$result === 'success' ? `
+    background: linear-gradient(135deg, #4caf50, #66bb6a);
+    color: white;
+    border: 2px solid #4caf50;
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+  ` : `
+    background: linear-gradient(135deg, #f44336, #ef5350);
+    color: white;
+    border: 2px solid #f44336;
+    box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3);
+  `}
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+`;
+
 const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const robotArmRef = useRef<RobotArm | null>(null);
@@ -209,6 +236,7 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
   const [apiKey, setApiKey] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [task, setTask] = useState('Move the robot arm to touch any of the 3D objects');
+  const [verificationResult, setVerificationResult] = useState<'success' | 'failed' | null>(null);
   
   const recordingDataRef = useRef<Array<{
     timestamp: number;
@@ -321,6 +349,7 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
     }
 
     setIsVerifying(true);
+    setVerificationResult(null); // Clear previous result
 
     try {
       // Capture canvas screenshot as PNG and convert to base64
@@ -355,16 +384,6 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
       console.log('📤 INPUT - Captured image (data URL):');
       console.log(imageDataUrl);
       console.log('📤 INPUT - Base64 image length:', base64Image.length, 'characters');
-
-      // 💾 AUTO-SAVE: Save the image being sent to Gemini
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const downloadLink = document.createElement('a');
-      downloadLink.href = imageDataUrl;
-      downloadLink.download = `gemini-input-${timestamp}.png`;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      document.body.removeChild(downloadLink);
-      console.log('💾 Auto-saved image sent to Gemini:', `gemini-input-${timestamp}.png`);
 
       const requestBody = {
         contents: [{
@@ -411,14 +430,17 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
       
       if (isVerified) {
         console.log('✅ Gemini verified success - CAPTCHA PASSED!');
+        setVerificationResult('success');
         onVerify(true);        // CAPTCHA passed!
       } else {
         console.log('❌ Gemini verification failed - try again');
+        setVerificationResult('failed');
         onVerify(false);
       }
     } catch (err) {
       console.error('Gemini verification error:', err);
       alert(`Verification failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setVerificationResult('failed');
       onVerify(false);
     } finally {
       setIsVerifying(false);
@@ -500,6 +522,13 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
     } else if (currentTime > recordingDataRef.current[recordingDataRef.current.length - 1]?.timestamp) {
       // Replay finished
       stopReplay();
+    }
+  };
+
+  // Clear verification result when user makes changes
+  const clearVerificationResult = () => {
+    if (verificationResult) {
+      setVerificationResult(null);
     }
   };
 
@@ -827,7 +856,10 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
           type="password"
           placeholder="Enter your Gemini API key..."
           value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
+          onChange={(e) => {
+            setApiKey(e.target.value);
+            clearVerificationResult();
+          }}
           disabled={isRecording || isReplaying || isVerifying}
         />
       </ApiKeyContainer>
@@ -841,7 +873,10 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
           type="text"
           placeholder="e.g., Move the robot arm to touch a red cube"
           value={task}
-          onChange={(e) => setTask(e.target.value)}
+          onChange={(e) => {
+            setTask(e.target.value);
+            clearVerificationResult();
+          }}
           disabled={isRecording || isReplaying || isVerifying}
         />
       </ApiKeyContainer>
@@ -927,6 +962,12 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
         HasData={hasRecording ? 'YES' : 'NO'} | 
         Replaying={isReplaying ? 'ON' : 'OFF'}
       </div>
+      
+      {verificationResult && (
+        <VerificationResult $result={verificationResult}>
+          {verificationResult === 'success' ? 'CAPTCHA PASSED!' : 'CAPTCHA FAILED'}
+        </VerificationResult>
+      )}
     </OuterBox>
   );
 };
