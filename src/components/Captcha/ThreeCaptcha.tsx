@@ -96,6 +96,62 @@ const Instructions = styled.div`
   line-height: 1.4;
 `;
 
+const ControlsContainer = styled.div`
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  align-items: center;
+`;
+
+const ControlButton = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger' }>`
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  ${props => {
+    switch (props.$variant) {
+      case 'primary':
+        return `
+          background: #2196f3;
+          color: white;
+          &:hover { background: #1976d2; }
+          &:disabled { background: #ccc; cursor: not-allowed; }
+        `;
+      case 'danger':
+        return `
+          background: #f44336;
+          color: white;
+          &:hover { background: #d32f2f; }
+          &:disabled { background: #ccc; cursor: not-allowed; }
+        `;
+      default:
+        return `
+          background: #e0e0e0;
+          color: #333;
+          &:hover { background: #d0d0d0; }
+          &:disabled { background: #f5f5f5; color: #999; cursor: not-allowed; }
+        `;
+    }
+  }}
+`;
+
+const StatusIndicator = styled.div<{ $isActive: boolean }>`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: ${props => props.$isActive ? '#f44336' : '#ccc'};
+  animation: ${props => props.$isActive ? 'blink 1s infinite' : 'none'};
+  
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.3; }
+  }
+`;
+
 const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const robotArmRef = useRef<RobotArm | null>(null);
@@ -103,6 +159,163 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
   const lastTimeRef = useRef<number>(0);
   const worldRef = useRef<RAPIER.World | null>(null);
   const initializedRef = useRef<boolean>(false);
+  // Refs that always hold the latest on/off state for the animation loop
+  const isRecordingRef = useRef<boolean>(false);
+  const isReplayingRef = useRef<boolean>(false);
+
+  // Recording and replay states
+  const [isRecording, setIsRecording] = useState(false);
+  const [isReplaying, setIsReplaying] = useState(false);
+  const [hasRecording, setHasRecording] = useState(false);
+  const recordingDataRef = useRef<Array<{
+    timestamp: number;
+    robotArm: { x: number, y: number, z: number };
+    objects: Array<{
+      position: { x: number, y: number, z: number };
+      rotation: { x: number, y: number, z: number, w: number };
+    }>;
+  }>>([]);
+  const recordingStartTimeRef = useRef<number>(0);
+  const replayStartTimeRef = useRef<number>(0);
+
+  // Recording and replay functions
+  const startRecording = () => {
+    console.log('🔴 startRecording function called!');
+    console.log('🔴 Before setState - isReplaying:', isReplaying);
+    
+    if (isReplaying) {
+      console.log('❌ Cannot start recording - currently replaying');
+      return;
+    }
+    
+    console.log('🔴 Clearing recording data...');
+    recordingDataRef.current = [];
+    
+    console.log('🔴 Setting start time...');
+    recordingStartTimeRef.current = performance.now();
+    
+    console.log('🔴 About to call setIsRecording(true)...');
+    setIsRecording(true);
+    isRecordingRef.current = true;
+    
+    console.log('🔴 setIsRecording(true) called - Recording should start now!');
+    console.log('🔴 Recording started');
+  };
+
+  const stopRecording = () => {
+    setIsRecording(false);
+    isRecordingRef.current = false;
+    const frameCount = recordingDataRef.current.length;
+    console.log('⏹️ Recording stopped. Frames:', frameCount);
+    console.log('🎬 Recording data:', recordingDataRef.current.slice(0, 3)); // Show first 3 frames
+    
+    if (frameCount > 0) {
+      setHasRecording(true);
+      console.log('✅ Has recording set to true');
+    } else {
+      setHasRecording(false);
+      console.log('❌ No recording data found');
+    }
+  };
+
+  const startReplay = () => {
+    console.log('🎮 Replay attempt - hasRecording:', hasRecording, 'isRecording:', isRecording);
+    console.log('🎮 Recording data length:', recordingDataRef.current.length);
+    
+    if (!hasRecording || isRecording) {
+      console.log('❌ Cannot start replay - conditions not met');
+      return;
+    }
+    
+    replayStartTimeRef.current = performance.now();
+    setIsReplaying(true);
+    isReplayingRef.current = true;
+    console.log('▶️ Replay started with', recordingDataRef.current.length, 'frames');
+  };
+
+  const stopReplay = () => {
+    setIsReplaying(false);
+    isReplayingRef.current = false;
+    console.log('⏹️ Replay stopped');
+  };
+
+  // Record current state
+  const recordFrame = () => {
+    // Debug: Always log when this function is called
+    if (recordingDataRef.current.length === 0 && isRecordingRef.current) {
+      console.log('🎬 recordFrame called - isRecording:', isRecordingRef.current, 'robotArmRef:', !!robotArmRef.current, 'objectsRef:', !!objectsRef.current);
+    }
+    
+    if (!isRecordingRef.current) {
+      return; // Silent return when not recording
+    }
+    
+    if (!robotArmRef.current || !objectsRef.current) {
+      console.log('❌ Missing refs for recording');
+      return;
+    }
+
+    const currentTime = performance.now() - recordingStartTimeRef.current;
+    const robotPos = robotArmRef.current.position;
+    
+    const objectStates = objectsRef.current.map(obj => ({
+      position: {
+        x: obj.mesh.position.x,
+        y: obj.mesh.position.y,
+        z: obj.mesh.position.z
+      },
+      rotation: {
+        x: obj.mesh.quaternion.x,
+        y: obj.mesh.quaternion.y,
+        z: obj.mesh.quaternion.z,
+        w: obj.mesh.quaternion.w
+      }
+    }));
+
+    recordingDataRef.current.push({
+      timestamp: currentTime,
+      robotArm: { x: robotPos.x, y: robotPos.y, z: robotPos.z },
+      objects: objectStates
+    });
+
+    // Log every 60 frames (roughly every second at 60fps)
+    if (recordingDataRef.current.length % 60 === 0) {
+      console.log(`📹 Recording... ${recordingDataRef.current.length} frames`);
+    }
+  };
+
+  // Replay frame
+  const replayFrame = () => {
+    if (!isReplaying || !robotArmRef.current || !objectsRef.current) return;
+
+    const currentTime = performance.now() - replayStartTimeRef.current;
+    const frame = recordingDataRef.current.find(f => f.timestamp >= currentTime);
+    
+    if (frame) {
+      // Set robot arm position
+      robotArmRef.current.setPosition(new THREE.Vector3(
+        frame.robotArm.x,
+        frame.robotArm.y,
+        frame.robotArm.z
+      ));
+
+      // Set object positions and rotations
+      frame.objects.forEach((objState, index) => {
+        if (objectsRef.current[index]) {
+          const obj = objectsRef.current[index];
+          obj.mesh.position.set(objState.position.x, objState.position.y, objState.position.z);
+          obj.mesh.quaternion.set(objState.rotation.x, objState.rotation.y, objState.rotation.z, objState.rotation.w);
+          
+          // Also update physics body
+          obj.body.setTranslation(objState.position, true);
+          obj.body.setRotation(objState.rotation, true);
+        }
+      });
+    } else if (currentTime > recordingDataRef.current[recordingDataRef.current.length - 1]?.timestamp) {
+      // Replay finished
+      stopReplay();
+    }
+  };
 
   useEffect(() => {
     // Simple duplicate prevention using ref
@@ -344,20 +557,28 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
         const deltaTime = (currentTime - lastTimeRef.current) / 1000;
         lastTimeRef.current = currentTime;
         
-        // Step Rapier physics simulation with balanced precision
-        if (worldRef.current) {
+        // Step Rapier physics simulation with balanced precision (only if not replaying)
+        if (worldRef.current && !isReplayingRef.current) {
           // Use normal step rate for good performance and interaction
           worldRef.current.step();
         }
         
-        // Sync object meshes with their physics bodies
-        objects.forEach(obj => {
-          const position = obj.body.translation();
-          const rotation = obj.body.rotation();
+        // Handle replay or normal physics
+        if (isReplayingRef.current) {
+          replayFrame();
+        } else {
+          // Sync object meshes with their physics bodies (normal mode)
+          objects.forEach(obj => {
+            const position = obj.body.translation();
+            const rotation = obj.body.rotation();
+            
+            obj.mesh.position.set(position.x, position.y, position.z);
+            obj.mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+          });
           
-          obj.mesh.position.set(position.x, position.y, position.z);
-          obj.mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
-        });
+          // Record frame if recording
+          recordFrame();
+        }
         
         renderer.render(scene, camera);
       };
@@ -408,6 +629,56 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
       <Instructions>
         Move the robot arm to touch any of the 3D objects to verify you're human.
       </Instructions>
+      <ControlsContainer>
+        {!isRecording ? (
+          <ControlButton 
+            $variant="primary" 
+            onClick={() => {
+              console.log('🔵 Start Recording button clicked!');
+              startRecording();
+            }}
+            disabled={isReplaying}
+          >
+            🔴 Start Recording
+          </ControlButton>
+        ) : (
+          <ControlButton 
+            $variant="danger" 
+            onClick={() => {
+              console.log('🔵 Stop Recording button clicked!');
+              stopRecording();
+            }}
+          >
+            ⏹️ Stop Recording
+          </ControlButton>
+        )}
+        
+        {!isReplaying ? (
+          <ControlButton 
+            onClick={startReplay}
+            disabled={!hasRecording || isRecording}
+          >
+            ▶️ Replay {hasRecording ? '(Ready)' : '(No Data)'}
+          </ControlButton>
+        ) : (
+          <ControlButton 
+            $variant="danger" 
+            onClick={stopReplay}
+          >
+            ⏹️ Stop Replay
+          </ControlButton>
+        )}
+        
+        {isRecording && <StatusIndicator $isActive={true} />}
+        {isReplaying && <span style={{fontSize: '0.8rem', color: '#666'}}>Replaying...</span>}
+      </ControlsContainer>
+      
+      {/* Debug info - remove in production */}
+      <div style={{fontSize: '0.7rem', color: '#999', marginTop: '8px', textAlign: 'center'}}>
+        Debug: Recording={isRecording ? 'ON' : 'OFF'} | 
+        HasData={hasRecording ? 'YES' : 'NO'} | 
+        Replaying={isReplaying ? 'ON' : 'OFF'}
+      </div>
     </OuterBox>
   );
 };
