@@ -208,6 +208,7 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
   // Gemini API states
   const [apiKey, setApiKey] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+  const [task, setTask] = useState('Move the robot arm to touch any of the 3D objects');
   
   const recordingDataRef = useRef<Array<{
     timestamp: number;
@@ -281,6 +282,29 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
     console.log('⏹️ Replay stopped');
   };
 
+  // Save current canvas as image file
+  const saveCanvasImage = () => {
+    if (!rendererRef.current) {
+      console.log('❌ Renderer not ready');
+      return;
+    }
+
+    const canvas = rendererRef.current.domElement;
+    const imageDataUrl = canvas.toDataURL('image/png');
+    
+    // Create download link
+    const downloadLink = document.createElement('a');
+    downloadLink.href = imageDataUrl;
+    downloadLink.download = `captcha-screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+    
+    // Trigger download
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+    
+    console.log('💾 Canvas image saved locally');
+  };
+
   // Gemini verification function
   const verifyWithGemini = async () => {
     console.log('🟢 Verifying with Gemini Flash 2.0…');
@@ -305,47 +329,83 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
       // Remove the "data:image/png;base64," prefix
       const base64Image = imageDataUrl.split(',')[1];
 
-      const prompt = `Please analyze this 3D CAPTCHA image carefully. The task is: "User must move the robot arm to touch any 3D object."
+      const prompt = `Please analyze this 3D image carefully. The task is: "${task}".
 
-Look at the image and determine:
-1. Is there a robot arm (gray cylindrical object) visible?
-2. Are there colored 3D cube objects visible?
-3. Is the robot arm positioned close enough to touch or intersect with any of the 3D objects?
+Look at the image and determine if the specified task has been completed:
 
-If the robot arm appears to be touching or very close to any of the colored cubes, respond with "VERIFIED" - otherwise respond with "NOT_VERIFIED".
+1. Carefully examine all elements in the scene:
+   - Robot arm (gray cylindrical object)
+   - Colored 3D cube objects
+   - Their positions and interactions
+
+2. Evaluate if the current scene matches the task requirement: "${task}"
+
+3. Consider the task completed if:
+   - The described action appears to have been performed
+   - The scene shows reasonable evidence of task completion
+   - Be somewhat lenient in interpretation (close proximity or interaction counts)
+
+If the task appears to be completed based on what you can see in the image, respond with "VERIFIED" - otherwise respond with "NOT_VERIFIED".
 
 Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanation needed.`;
+
+      // 🔍 DEBUG: Log input data
+      console.log('📤 INPUT - Prompt sent to Gemini:');
+      console.log(prompt);
+      console.log('📤 INPUT - Captured image (data URL):');
+      console.log(imageDataUrl);
+      console.log('📤 INPUT - Base64 image length:', base64Image.length, 'characters');
+
+      // 💾 AUTO-SAVE: Save the image being sent to Gemini
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const downloadLink = document.createElement('a');
+      downloadLink.href = imageDataUrl;
+      downloadLink.download = `gemini-input-${timestamp}.png`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      console.log('💾 Auto-saved image sent to Gemini:', `gemini-input-${timestamp}.png`);
+
+      const requestBody = {
+        contents: [{
+          parts: [
+            {
+              text: prompt
+            },
+            {
+              inline_data: {
+                mime_type: "image/png",
+                data: base64Image
+              }
+            }
+          ]
+        }]
+      };
+
+      console.log('📤 INPUT - Full API request body:');
+      console.log(JSON.stringify(requestBody, null, 2));
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-thinking-exp:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              {
-                text: prompt
-              },
-              {
-                inline_data: {
-                  mime_type: "image/png",
-                  data: base64Image
-                }
-              }
-            ]
-          }]
-        })
+        body: JSON.stringify(requestBody)
       });
 
       const data = await response.json();
+      
+      // 🔍 DEBUG: Log full response
+      console.log('📥 OUTPUT - Full API response:');
+      console.log(JSON.stringify(data, null, 2));
+      console.log('📥 OUTPUT - Response status:', response.status, response.statusText);
       
       if (!response.ok) {
         throw new Error(`Gemini API Error: ${data.error?.message || 'Unknown error'}`);
       }
 
       const result = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      console.log('🤖 Gemini response:', result);
+      console.log('🤖 OUTPUT - Gemini final result:', result);
 
       const isVerified = result.toUpperCase().includes('VERIFIED') && !result.toUpperCase().includes('NOT_VERIFIED');
       
@@ -468,7 +528,12 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
       const camera = new THREE.PerspectiveCamera(60, 400 / 400, 0.1, 1000); // Reduced FOV for zoom effect
       camera.position.set(0, 5, 5); // Moved camera closer
       camera.lookAt(0, 0, 0);
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      // NOTE: `preserveDrawingBuffer: true` is required so that the framebuffer's
+      // pixels remain available when we later call `toDataURL()` for a screenshot.
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        preserveDrawingBuffer: true   // <-- keep the frame for screenshots
+      });
       rendererRef.current = renderer; // Store renderer reference for Gemini verification
       renderer.setSize(400, 400);
       if (mountRef.current) {
@@ -767,8 +832,24 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
         />
       </ApiKeyContainer>
       
+      <ApiKeyContainer>
+        <ApiKeyLabel htmlFor="captcha-task">
+          📋 CAPTCHA Task
+        </ApiKeyLabel>
+        <ApiKeyInput
+          id="captcha-task"
+          type="text"
+          placeholder="e.g., Move the robot arm to touch a red cube"
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          disabled={isRecording || isReplaying || isVerifying}
+        />
+      </ApiKeyContainer>
+      
       <Instructions>
-        Move the robot arm to touch any of the 3D objects to verify you're human.
+        <strong>Current Task:</strong> {task || 'No task specified'}
+        <br />
+        <small>Use the mouse to drag the robot arm around the scene.</small>
       </Instructions>
       <ControlsContainer>
         {!isRecording ? (
@@ -804,7 +885,11 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
         ) : (
           <ControlButton 
             $variant="danger" 
-            onClick={stopReplay}
+            onClick={() => {
+              console.log('🔵 Stop Replay button clicked!');
+              stopReplay();
+              saveCanvasImage();
+            }}
           >
             ⏹️ Stop Replay
           </ControlButton>
@@ -816,9 +901,20 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
             console.log('🟢 Verify with Gemini button clicked!');
             verifyWithGemini();
           }}
-          disabled={isRecording || isReplaying || isVerifying || !apiKey.trim()}
+          disabled={isRecording || isReplaying || isVerifying || !apiKey.trim() || !task.trim()}
         >
           {isVerifying ? '🔄 Verifying...' : '✅ Verify with Gemini'}
+        </ControlButton>
+        
+        <ControlButton
+          $variant="secondary"
+          onClick={() => {
+            console.log('📸 Save Screenshot button clicked!');
+            saveCanvasImage();
+          }}
+          disabled={isRecording || isReplaying || isVerifying}
+        >
+          📸 Save Screenshot
         </ControlButton>
         
         {isRecording && <StatusIndicator $isActive={true} />}
