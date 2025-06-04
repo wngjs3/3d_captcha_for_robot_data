@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.17.3",
     "@types/cannon": "^0.1.13",
     "@types/node": "^16.18.0",
     "@types/react": "^18.0.0",
