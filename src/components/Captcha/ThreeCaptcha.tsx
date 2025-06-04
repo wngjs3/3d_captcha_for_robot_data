@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import styled from 'styled-components';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -152,6 +152,41 @@ const StatusIndicator = styled.div<{ $isActive: boolean }>`
   }
 `;
 
+const ApiKeyContainer = styled.div`
+  width: 100%;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const ApiKeyLabel = styled.label`
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #555;
+  text-align: left;
+`;
+
+const ApiKeyInput = styled.input`
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  transition: border-color 0.2s ease;
+  box-sizing: border-box;
+  
+  &:focus {
+    outline: none;
+    border-color: #2196f3;
+    box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+  }
+  
+  &::placeholder {
+    color: #999;
+  }
+`;
+
 const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const robotArmRef = useRef<RobotArm | null>(null);
@@ -162,11 +197,18 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
   // Refs that always hold the latest on/off state for the animation loop
   const isRecordingRef = useRef<boolean>(false);
   const isReplayingRef = useRef<boolean>(false);
+  // Renderer ref for Gemini verification
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
 
   // Recording and replay states
   const [isRecording, setIsRecording] = useState(false);
   const [isReplaying, setIsReplaying] = useState(false);
   const [hasRecording, setHasRecording] = useState(false);
+  
+  // Gemini API states
+  const [apiKey, setApiKey] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  
   const recordingDataRef = useRef<Array<{
     timestamp: number;
     robotArm: { x: number, y: number, z: number };
@@ -237,6 +279,90 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
     setIsReplaying(false);
     isReplayingRef.current = false;
     console.log('⏹️ Replay stopped');
+  };
+
+  // Gemini verification function
+  const verifyWithGemini = async () => {
+    console.log('🟢 Verifying with Gemini Flash 2.0…');
+
+    if (!apiKey.trim()) {
+      alert('Please enter your Gemini API key first!');
+      return;
+    }
+
+    if (!rendererRef.current) {
+      console.log('❌ Renderer not ready');
+      onVerify(false);
+      return;
+    }
+
+    setIsVerifying(true);
+
+    try {
+      // Capture canvas screenshot as PNG and convert to base64
+      const canvas = rendererRef.current.domElement;
+      const imageDataUrl = canvas.toDataURL('image/png');
+      // Remove the "data:image/png;base64," prefix
+      const base64Image = imageDataUrl.split(',')[1];
+
+      const prompt = `Please analyze this 3D CAPTCHA image carefully. The task is: "User must move the robot arm to touch any 3D object."
+
+Look at the image and determine:
+1. Is there a robot arm (gray cylindrical object) visible?
+2. Are there colored 3D cube objects visible?
+3. Is the robot arm positioned close enough to touch or intersect with any of the 3D objects?
+
+If the robot arm appears to be touching or very close to any of the colored cubes, respond with "VERIFIED" - otherwise respond with "NOT_VERIFIED".
+
+Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanation needed.`;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-thinking-exp:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              {
+                text: prompt
+              },
+              {
+                inline_data: {
+                  mime_type: "image/png",
+                  data: base64Image
+                }
+              }
+            ]
+          }]
+        })
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(`Gemini API Error: ${data.error?.message || 'Unknown error'}`);
+      }
+
+      const result = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      console.log('🤖 Gemini response:', result);
+
+      const isVerified = result.toUpperCase().includes('VERIFIED') && !result.toUpperCase().includes('NOT_VERIFIED');
+      
+      if (isVerified) {
+        console.log('✅ Gemini verified success - CAPTCHA PASSED!');
+        onVerify(true);        // CAPTCHA passed!
+      } else {
+        console.log('❌ Gemini verification failed - try again');
+        onVerify(false);
+      }
+    } catch (err) {
+      console.error('Gemini verification error:', err);
+      alert(`Verification failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      onVerify(false);
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   // Record current state
@@ -343,6 +469,7 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
       camera.position.set(0, 5, 5); // Moved camera closer
       camera.lookAt(0, 0, 0);
       const renderer = new THREE.WebGLRenderer({ antialias: true });
+      rendererRef.current = renderer; // Store renderer reference for Gemini verification
       renderer.setSize(400, 400);
       if (mountRef.current) {
         mountRef.current.appendChild(renderer.domElement);
@@ -474,7 +601,6 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
 
       // Mouse/touch interaction variables
       let isDragging = false;
-      let dragOffset = new THREE.Vector3();
 
       const getPointerPosition = (event: MouseEvent | TouchEvent) => {
         const rect = renderer.domElement.getBoundingClientRect();
@@ -554,7 +680,6 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
         requestAnimationFrame(animate);
         
         const currentTime = performance.now();
-        const deltaTime = (currentTime - lastTimeRef.current) / 1000;
         lastTimeRef.current = currentTime;
         
         // Step Rapier physics simulation with balanced precision (only if not replaying)
@@ -618,6 +743,7 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
     };
 
     initPhysics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onVerify]);
 
   return (
@@ -626,6 +752,21 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
       <CanvasFrame>
         <div ref={mountRef} />
       </CanvasFrame>
+      
+      <ApiKeyContainer>
+        <ApiKeyLabel htmlFor="gemini-api-key">
+          🔑 Gemini API Key (Flash 2.0)
+        </ApiKeyLabel>
+        <ApiKeyInput
+          id="gemini-api-key"
+          type="password"
+          placeholder="Enter your Gemini API key..."
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          disabled={isRecording || isReplaying || isVerifying}
+        />
+      </ApiKeyContainer>
+      
       <Instructions>
         Move the robot arm to touch any of the 3D objects to verify you're human.
       </Instructions>
@@ -668,6 +809,17 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
             ⏹️ Stop Replay
           </ControlButton>
         )}
+        
+        <ControlButton
+          $variant="primary"
+          onClick={() => {
+            console.log('🟢 Verify with Gemini button clicked!');
+            verifyWithGemini();
+          }}
+          disabled={isRecording || isReplaying || isVerifying || !apiKey.trim()}
+        >
+          {isVerifying ? '🔄 Verifying...' : '✅ Verify with Gemini'}
+        </ControlButton>
         
         {isRecording && <StatusIndicator $isActive={true} />}
         {isReplaying && <span style={{fontSize: '0.8rem', color: '#666'}}>Replaying...</span>}
