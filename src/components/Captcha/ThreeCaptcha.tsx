@@ -19,7 +19,7 @@ class RobotArm {
 
   constructor(world: RAPIER.World) {
     this.world = world;
-    this.radius = 0.3;
+    this.radius = 0.2;
     
     // Create visual cylinder
     const geometry = new THREE.CylinderGeometry(this.radius, this.radius, 0.8, 16);
@@ -187,25 +187,16 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
       };
       
       for (let i = 0; i < numObjects; i++) {
-        const isBox = Math.random() > 0.5; // 50% chance for box or cylinder
+        // Create uniform cubes only (removed cylinder option)
         let geometry: THREE.BufferGeometry;
         let colliderDesc: RAPIER.ColliderDesc;
         let objectRadius: number;
         
-        if (isBox) {
-          // Create reasonably sized cubes for good interaction
-          const size = 0.2 + Math.random() * 0.25; // Size between 0.2 and 0.45 (moderate size)
-          geometry = new THREE.BoxGeometry(size, size, size);
-          colliderDesc = RAPIER.ColliderDesc.cuboid(size/2, size/2, size/2);
-          objectRadius = size * 1.2; // Reasonable safety radius
-        } else {
-          // Create reasonably sized cylinders
-          const radius = 0.1 + Math.random() * 0.15; // Radius between 0.1 and 0.25 (moderate size)
-          const height = 0.25 + Math.random() * 0.35; // Height between 0.25 and 0.6 (moderate size)
-          geometry = new THREE.CylinderGeometry(radius, radius, height, 16);
-          colliderDesc = RAPIER.ColliderDesc.cylinder(height/2, radius);
-          objectRadius = radius * 1.5; // Reasonable safety radius
-        }
+        // Create uniform sized cubes
+        const size = 0.4; // Fixed size for all cubes
+        geometry = new THREE.BoxGeometry(size, size, size);
+        colliderDesc = RAPIER.ColliderDesc.cuboid(size/2, size/2, size/2);
+        objectRadius = size * 1.2; // Reasonable safety radius
         
         // Create visual mesh
         const material = new THREE.MeshPhongMaterial({ 
