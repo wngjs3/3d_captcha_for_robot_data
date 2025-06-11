@@ -527,7 +527,7 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
   // Coordinate normalization function
   const normalizeCoordinates = (x: number, y: number, z: number) => {
     // Real-world scale mapping:
-    // Three.js: 6x6 unit table → Real world: 20x20cm table
+    // Three.js: 6x6 unit table → Real world: 20x20cm table (square)
     // Three.js: 0.75 unit cubes → Real world: 2.5x2.5cm cubes
     
     // Three.js coordinate ranges:
@@ -535,26 +535,26 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
     // Z: -3 to 3 (6 unit table depth)
     
     // Target coordinate ranges (real world units in meters):
-    // X: 0.2 to 0.40 (20cm range, back to front)
-    // Y: -0.20 to 0.20 (40cm range total, left to right, was Z axis)
+    // X: 0.2 to 0.4 (20cm range, back to front)
+    // Y: -0.1 to 0.1 (20cm range, left to right, was Z axis) - SQUARE EXPERIMENT
     
-    const normalizedX = 0.2 + ((x + 3) / 6) * (0.40 - 0.2); // -3~3 → 0.2~0.40 (20cm)
-    const normalizedY = -0.20 + ((z + 3) / 6) * (0.20 - (-0.20)); // -3~3 → -0.20~0.20 (40cm total)
+    const normalizedX = 0.2 + ((x + 3) / 6) * (0.4 - 0.2); // -3~3 → 0.2~0.4 (20cm)
+    const normalizedY = -0.1 + ((z + 3) / 6) * (0.1 - (-0.1)); // -3~3 → -0.1~0.1 (20cm total)
     
     return {
-      x: Math.max(0.2, Math.min(0.40, normalizedX)),
-      y: Math.max(-0.20, Math.min(0.20, normalizedY))
+      x: Math.max(0.2, Math.min(0.4, normalizedX)),
+      y: Math.max(-0.1, Math.min(0.1, normalizedY))
     };
   };
 
   // Reverse coordinate normalization for replay
   const denormalizeCoordinates = (normalizedX: number, normalizedY: number) => {
     // Convert normalized coordinates back to Three.js coordinates
-    // X: 0.2~0.40 → -3~3
-    // Y: -0.20~0.20 → -3~3 (this becomes Z in Three.js)
+    // X: 0.2~0.4 → -3~3
+    // Y: -0.1~0.1 → -3~3 (this becomes Z in Three.js)
     
-    const threeX = ((normalizedX - 0.2) / (0.40 - 0.2)) * 6 - 3; // 0.2~0.40 → -3~3
-    const threeZ = ((normalizedY - (-0.20)) / (0.20 - (-0.20))) * 6 - 3; // -0.20~0.20 → -3~3
+    const threeX = ((normalizedX - 0.2) / (0.4 - 0.2)) * 6 - 3; // 0.2~0.4 → -3~3
+    const threeZ = ((normalizedY - (-0.1)) / (0.1 - (-0.1))) * 6 - 3; // -0.1~0.1 → -3~3
     
     return {
       x: threeX,
