@@ -56,15 +56,89 @@ class RobotArm {
 }
 
 const OuterBox = styled.div`
-  width: 460px;
-  padding: 32px 24px 24px 24px;
+  display: flex;
+  gap: 20px;
+  padding: 20px;
+  max-width: 1000px;
+  margin: 0 auto;
   background: #fafdff;
   border: 2.5px solid #2196f3;
   border-radius: 16px;
   box-shadow: 0 4px 16px rgba(33, 150, 243, 0.08);
+`;
+
+const MainContent = styled.div`
+  width: 460px;
+  padding: 12px 24px 24px 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
+`;
+
+const TaskExamplesPanel = styled.div`
+  width: 320px;
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  height: fit-content;
+  border: 1px solid #e0e0e0;
+`;
+
+const TaskExamplesTitle = styled.h3`
+  margin: 0 0 16px 0;
+  color: #2196f3;
+  font-size: 1.1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 2px solid #e3f2fd;
+  padding-bottom: 8px;
+`;
+
+const TaskExamplesList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const TaskExampleItem = styled.button`
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 12px 14px;
+  text-align: left;
+  font-size: 0.85rem;
+  color: #495057;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1.4;
+  font-family: inherit;
+
+  &:hover {
+    background: #e3f2fd;
+    border-color: #2196f3;
+    color: #1976d2;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(33, 150, 243, 0.2);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    &:hover {
+      background: #f8f9fa;
+      border-color: #e9ecef;
+      color: #495057;
+      transform: none;
+      box-shadow: none;
+    }
+  }
 `;
 
 const Logo = styled.div`
@@ -86,6 +160,11 @@ const CanvasFrame = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  
+  canvas {
+    border-radius: 6px;
+  }
 `;
 
 const Instructions = styled.div`
@@ -237,6 +316,26 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
   const [isVerifying, setIsVerifying] = useState(false);
   const [task, setTask] = useState('Move the robot arm to touch any of the 3D objects');
   const [verificationResult, setVerificationResult] = useState<'success' | 'failed' | null>(null);
+
+  // Task examples for quick selection
+  const taskExamples = [
+    'Bring all the boxes together in one place',
+    'Move the red box to the center of the table.',
+    'Separate the blue box from the other boxes.',
+    'Keep the red and green boxes touching each other.',
+    'Put every box near the front edge.',
+    'Place the red box between the green and blue boxes.',
+    'Keep the red and green boxes together and away from the blue box.',
+    'Align all boxes in a straight row from left to right: red → green → blue.',
+    'Move each box to a different corner of the table.',
+    'Cluster all boxes at the back-right corner.'
+  ];
+
+  // Function to handle task example selection
+  const selectTaskExample = (example: string) => {
+    setTask(example);
+    clearVerificationResult();
+  };
   
   const recordingDataRef = useRef<Array<{
     timestamp: number;
@@ -1004,143 +1103,163 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
 
   return (
     <OuterBox>
-      <Logo>3D CAPTCHA</Logo>
-      <CanvasFrame>
-        <div ref={mountRef} />
-      </CanvasFrame>
-      
-      <ApiKeyContainer>
-        <ApiKeyLabel htmlFor="gemini-api-key">
-          🔑 Gemini API Key (Flash 2.0)
-        </ApiKeyLabel>
-        <ApiKeyInput
-          id="gemini-api-key"
-          type="password"
-          placeholder="Enter your Gemini API key..."
-          value={apiKey}
-          onChange={(e) => {
-            setApiKey(e.target.value);
-            clearVerificationResult();
-          }}
-          disabled={isRecording || isReplaying || isVerifying}
-        />
-      </ApiKeyContainer>
-      
-      <ApiKeyContainer>
-        <ApiKeyLabel htmlFor="captcha-task">
-          📋 CAPTCHA Task
-        </ApiKeyLabel>
-        <ApiKeyInput
-          id="captcha-task"
-          type="text"
-          placeholder="e.g., Move the robot arm to touch a red cube"
-          value={task}
-          onChange={(e) => {
-            setTask(e.target.value);
-            clearVerificationResult();
-          }}
-          disabled={isRecording || isReplaying || isVerifying}
-        />
-      </ApiKeyContainer>
-      
-      <Instructions>
-        <strong>Current Task:</strong> {task || 'No task specified'}
-        <br />
-        <small>Use the mouse to drag the robot arm around the scene.</small>
-      </Instructions>
-      <ControlsContainer>
-        {!isRecording ? (
-          <ControlButton 
-            $variant="primary" 
-            onClick={() => {
-              console.log('🔵 Start Recording button clicked!');
-              startRecording();
-            }}
-            disabled={isReplaying}
-          >
-            🔴 Start Recording
-          </ControlButton>
-        ) : (
-          <ControlButton 
-            $variant="danger" 
-            onClick={() => {
-              console.log('🔵 Stop Recording button clicked!');
-              stopRecording();
-            }}
-          >
-            ⏹️ Stop Recording
-          </ControlButton>
-        )}
+      <MainContent>
+        <Logo>3D CAPTCHA</Logo>
+        <CanvasFrame>
+          <div ref={mountRef} />
+        </CanvasFrame>
         
-        {!isReplaying ? (
-          <ControlButton 
-            onClick={startReplay}
-            disabled={!hasRecording || isRecording}
-          >
-            ▶️ Replay {hasRecording ? '(Ready)' : '(No Data)'}
-          </ControlButton>
-        ) : (
-          <ControlButton 
-            $variant="danger" 
+        <ApiKeyContainer>
+          <ApiKeyLabel htmlFor="gemini-api-key">
+            🔑 Gemini API Key (Flash 2.0)
+          </ApiKeyLabel>
+          <ApiKeyInput
+            id="gemini-api-key"
+            type="password"
+            placeholder="Enter your Gemini API key..."
+            value={apiKey}
+            onChange={(e) => {
+              setApiKey(e.target.value);
+              clearVerificationResult();
+            }}
+            disabled={isRecording || isReplaying || isVerifying}
+          />
+        </ApiKeyContainer>
+        
+        <ApiKeyContainer>
+          <ApiKeyLabel htmlFor="captcha-task">
+            📋 CAPTCHA Task
+          </ApiKeyLabel>
+          <ApiKeyInput
+            id="captcha-task"
+            type="text"
+            placeholder="e.g., Move the robot arm to touch a red cube"
+            value={task}
+            onChange={(e) => {
+              setTask(e.target.value);
+              clearVerificationResult();
+            }}
+            disabled={isRecording || isReplaying || isVerifying}
+          />
+        </ApiKeyContainer>
+        
+        <Instructions>
+          <strong>Current Task:</strong> {task || 'No task specified'}
+          <br />
+          <small>Use the mouse to drag the robot arm around the scene.</small>
+        </Instructions>
+        <ControlsContainer>
+          {!isRecording ? (
+            <ControlButton 
+              $variant="primary" 
+              onClick={() => {
+                console.log('🔵 Start Recording button clicked!');
+                startRecording();
+              }}
+              disabled={isReplaying}
+            >
+              🔴 Start Recording
+            </ControlButton>
+          ) : (
+            <ControlButton 
+              $variant="danger" 
+              onClick={() => {
+                console.log('🔵 Stop Recording button clicked!');
+                stopRecording();
+              }}
+            >
+              ⏹️ Stop Recording
+            </ControlButton>
+          )}
+          
+          {!isReplaying ? (
+            <ControlButton 
+              onClick={startReplay}
+              disabled={!hasRecording || isRecording}
+            >
+              ▶️ Replay {hasRecording ? '(Ready)' : '(No Data)'}
+            </ControlButton>
+          ) : (
+            <ControlButton 
+              $variant="danger" 
+              onClick={() => {
+                console.log('🔵 Stop Replay button clicked!');
+                stopReplay();
+                saveCanvasImage();
+              }}
+            >
+              ⏹️ Stop Replay
+            </ControlButton>
+          )}
+          
+          <ControlButton
+            $variant="primary"
             onClick={() => {
-              console.log('🔵 Stop Replay button clicked!');
-              stopReplay();
+              console.log('🟢 Verify with Gemini button clicked!');
+              verifyWithGemini();
+            }}
+            disabled={isRecording || isReplaying || isVerifying || !apiKey.trim() || !task.trim()}
+          >
+            {isVerifying ? '🔄 Verifying...' : '✅ Verify with Gemini'}
+          </ControlButton>
+          
+          <ControlButton
+            $variant="secondary"
+            onClick={() => {
+              console.log('📸 Save Screenshot button clicked!');
               saveCanvasImage();
             }}
+            disabled={isRecording || isReplaying || isVerifying}
           >
-            ⏹️ Stop Replay
+            📸 Save Screenshot
           </ControlButton>
+          
+          <ControlButton
+            $variant="secondary"
+            onClick={() => {
+              console.log('📊 Save CSV button clicked!');
+              saveRecordingAsCSV();
+            }}
+            disabled={!hasRecording || isRecording || isReplaying || isVerifying}
+          >
+            📊 Save CSV {hasRecording ? '(Ready)' : '(No Data)'}
+          </ControlButton>
+          
+          {isRecording && <StatusIndicator $isActive={true} />}
+          {isReplaying && <span style={{fontSize: '0.8rem', color: '#666'}}>Replaying...</span>}
+        </ControlsContainer>
+        
+        {/* Debug info - remove in production */}
+        <div style={{fontSize: '0.7rem', color: '#999', marginTop: '8px', textAlign: 'center'}}>
+          Debug: Recording={isRecording ? 'ON' : 'OFF'} | 
+          HasData={hasRecording ? 'YES' : 'NO'} | 
+          Replaying={isReplaying ? 'ON' : 'OFF'}
+        </div>
+        
+        {verificationResult && (
+          <VerificationResult $result={verificationResult}>
+            {verificationResult === 'success' ? 'CAPTCHA PASSED!' : 'CAPTCHA FAILED'}
+          </VerificationResult>
         )}
-        
-        <ControlButton
-          $variant="primary"
-          onClick={() => {
-            console.log('🟢 Verify with Gemini button clicked!');
-            verifyWithGemini();
-          }}
-          disabled={isRecording || isReplaying || isVerifying || !apiKey.trim() || !task.trim()}
-        >
-          {isVerifying ? '🔄 Verifying...' : '✅ Verify with Gemini'}
-        </ControlButton>
-        
-        <ControlButton
-          $variant="secondary"
-          onClick={() => {
-            console.log('📸 Save Screenshot button clicked!');
-            saveCanvasImage();
-          }}
-          disabled={isRecording || isReplaying || isVerifying}
-        >
-          📸 Save Screenshot
-        </ControlButton>
-        
-        <ControlButton
-          $variant="secondary"
-          onClick={() => {
-            console.log('📊 Save CSV button clicked!');
-            saveRecordingAsCSV();
-          }}
-          disabled={!hasRecording || isRecording || isReplaying || isVerifying}
-        >
-          📊 Save CSV {hasRecording ? '(Ready)' : '(No Data)'}
-        </ControlButton>
-        
-        {isRecording && <StatusIndicator $isActive={true} />}
-        {isReplaying && <span style={{fontSize: '0.8rem', color: '#666'}}>Replaying...</span>}
-      </ControlsContainer>
-      
-      {/* Debug info - remove in production */}
-      <div style={{fontSize: '0.7rem', color: '#999', marginTop: '8px', textAlign: 'center'}}>
-        Debug: Recording={isRecording ? 'ON' : 'OFF'} | 
-        HasData={hasRecording ? 'YES' : 'NO'} | 
-        Replaying={isReplaying ? 'ON' : 'OFF'}
-      </div>
-      
-      {verificationResult && (
-        <VerificationResult $result={verificationResult}>
-          {verificationResult === 'success' ? 'CAPTCHA PASSED!' : 'CAPTCHA FAILED'}
-        </VerificationResult>
-      )}
+      </MainContent>
+
+      <TaskExamplesPanel>
+        <TaskExamplesTitle>
+          💡 Task Examples
+        </TaskExamplesTitle>
+        <TaskExamplesList>
+          {taskExamples.map((example, index) => (
+            <TaskExampleItem
+              key={index}
+              onClick={() => selectTaskExample(example)}
+              disabled={isRecording || isReplaying || isVerifying}
+              title={`Click to use: ${example}`}
+            >
+              {example}
+            </TaskExampleItem>
+          ))}
+        </TaskExamplesList>
+      </TaskExamplesPanel>
     </OuterBox>
   );
 };
