@@ -2,7 +2,7 @@
   "name": "3d-captcha",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://wngjs3.github.io/3d_captcha_for_robot_data",
+  "homepage": "https://github.com/wngjs3/3d_captcha_for_robot_data",
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.17.3",
     "@types/cannon": "^0.1.13",
