@@ -547,6 +547,21 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
     };
   };
 
+  // Reverse coordinate normalization for replay
+  const denormalizeCoordinates = (normalizedX: number, normalizedY: number) => {
+    // Convert normalized coordinates back to Three.js coordinates
+    // X: 0.2~0.40 → -3~3
+    // Y: -0.20~0.20 → -3~3 (this becomes Z in Three.js)
+    
+    const threeX = ((normalizedX - 0.2) / (0.40 - 0.2)) * 6 - 3; // 0.2~0.40 → -3~3
+    const threeZ = ((normalizedY - (-0.20)) / (0.20 - (-0.20))) * 6 - 3; // -0.20~0.20 → -3~3
+    
+    return {
+      x: threeX,
+      z: threeZ
+    };
+  };
+
   // Record current state with fixed timestamp
   const recordFixedFrame = () => {
     if (!robotArmRef.current || !objectsRef.current) {
@@ -569,7 +584,7 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
         position: {
           x: normalizedObjPos.x,  // Normalized X (0.2~0.40)
           y: normalizedObjPos.y,  // Normalized Y (was Z, -0.20~0.20)
-          z: obj.mesh.position.y  // Keep original Y as Z (height)
+          z: 0.76                 // Fixed Z value for all objects
         },
         rotation: {
           x: obj.mesh.quaternion.x,
@@ -585,7 +600,7 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
       robotArm: { 
         x: normalizedRobotPos.x,  // Normalized X (0.2~0.40)
         y: normalizedRobotPos.y,  // Normalized Y (was Z, -0.20~0.20)
-        z: 1.0                    // Fixed Z value
+        z: 0.76                   // Fixed Z value
       },
       objects: objectStates
     });
@@ -613,23 +628,32 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
     const frame = recordingDataRef.current.find(f => f.timestamp >= currentTime);
     
     if (frame) {
-      // Set robot arm position
+      // Denormalize robot arm position back to Three.js coordinates
+      const robotArmThreePos = denormalizeCoordinates(frame.robotArm.x, frame.robotArm.y);
       robotArmRef.current.setPosition(new THREE.Vector3(
-        frame.robotArm.x,
-        frame.robotArm.y,
-        frame.robotArm.z
+        robotArmThreePos.x,
+        ROBOT_ARM_Y, // Use actual robot arm height, not the fixed CSV value
+        robotArmThreePos.z
       ));
 
       // Set object positions and rotations
       frame.objects.forEach((objState, index) => {
         if (objectsRef.current[index]) {
           const obj = objectsRef.current[index];
-          obj.mesh.position.set(objState.position.x, objState.position.y, objState.position.z);
-          obj.mesh.quaternion.set(objState.rotation.x, objState.rotation.y, objState.rotation.z, objState.rotation.w);
+          
+          // Denormalize object position back to Three.js coordinates
+          const objThreePos = denormalizeCoordinates(objState.position.x, objState.position.y);
+          
+          // Use actual object height from physics simulation, not the fixed CSV value
+          // Objects settle on table at height = cube_size/2 = 0.75/2 = 0.375
+          const actualHeight = 0.375; // Half of cube size (0.75), resting on table
+          
+          obj.mesh.position.set(objThreePos.x, actualHeight, objThreePos.z);
+          obj.mesh.quaternion.set(objState.rotation.x, objState.rotation.z, objState.rotation.y, objState.rotation.w);
           
           // Also update physics body
-          obj.body.setTranslation(objState.position, true);
-          obj.body.setRotation(objState.rotation, true);
+          obj.body.setTranslation({x: objThreePos.x, y: actualHeight, z: objThreePos.z}, true);
+          obj.body.setRotation({x: objState.rotation.x, y: objState.rotation.z, z: objState.rotation.y, w: objState.rotation.w}, true);
         }
       });
     } else if (currentTime > recordingDataRef.current[recordingDataRef.current.length - 1]?.timestamp) {
@@ -714,16 +738,32 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
       const objects: Array<{ mesh: THREE.Mesh, body: RAPIER.RigidBody }> = [];
       const occupiedPositions: Array<{ x: number, z: number, radius: number }> = [];
       
-      // Define colors for objects
-      const colors = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff];
+      // Define colors for objects (Fixed mapping for data analysis)
+      const colors = [
+        0xff0000, // Object1 = Red
+        0x00ff00, // Object2 = Green  
+        0x0000ff  // Object3 = Blue
+      ];
       
-      // Create 3-5 random objects (restored for better interaction)
-      const numObjects = 3 + Math.floor(Math.random() * 3); // 3-5 objects
+      // Create exactly 3 objects (red, green, blue)
+      const numObjects = 3; // Fixed 3 objects
       
-      // Function to check if a position is too close to existing objects
+      // Function to check if a position is too close to existing objects or robot arm
       const isPositionValid = (x: number, z: number, radius: number): boolean => {
         const minDistance = radius * 4; // Reduced from 8 to allow more interaction
         
+        // Check distance from robot arm (starts at 0, 0.4, 0 with radius 0.45)
+        const robotArmX = 0;
+        const robotArmZ = 0;
+        const robotArmRadius = 0.45;
+        const distanceFromRobotArm = Math.sqrt(Math.pow(x - robotArmX, 2) + Math.pow(z - robotArmZ, 2));
+        const minDistanceFromRobotArm = robotArmRadius + radius + 0.5; // Extra safety margin
+        
+        if (distanceFromRobotArm < minDistanceFromRobotArm) {
+          return false; // Too close to robot arm
+        }
+        
+        // Check distance from other objects
         for (const pos of occupiedPositions) {
           const distance = Math.sqrt(Math.pow(x - pos.x, 2) + Math.pow(z - pos.z, 2));
           if (distance < minDistance + pos.radius * 2) { // Reduced safety margin
@@ -746,9 +786,10 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
         colliderDesc = RAPIER.ColliderDesc.cuboid(size/2, size/2, size/2);
         objectRadius = size * 1.2; // Reasonable safety radius
         
-        // Create visual mesh
+        // Create visual mesh with fixed color mapping
+        // Object1 (i=0) = Red, Object2 (i=1) = Green, Object3 (i=2) = Blue
         const material = new THREE.MeshPhongMaterial({ 
-          color: colors[i % colors.length],
+          color: colors[i], // Fixed color mapping: 0=Red, 1=Green, 2=Blue
           shininess: 30
         });
         const mesh = new THREE.Mesh(geometry, material);
@@ -855,8 +896,10 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
         if (intersection) {
           robotArm.setPosition(new THREE.Vector3(intersection.x, ROBOT_ARM_Y, intersection.z));
           
-          // Log robot arm position for debugging
-          console.log(`🤖 Robot arm position: x=${intersection.x.toFixed(2)}, y=${ROBOT_ARM_Y.toFixed(2)}, z=${intersection.z.toFixed(2)}`);
+          // Convert to normalized coordinates for display
+          const normalizedPos = normalizeCoordinates(intersection.x, ROBOT_ARM_Y, intersection.z);
+          console.log(`🤖 Robot arm position (normalized): x=${normalizedPos.x.toFixed(3)}, y=${normalizedPos.y.toFixed(3)}, z=0.760`);
+          console.log(`🤖 Robot arm position (raw): x=${intersection.x.toFixed(2)}, y=${ROBOT_ARM_Y.toFixed(2)}, z=${intersection.z.toFixed(2)}`);
           
           // Log distances to objects for debugging (removed verification trigger)
           objects.forEach((obj, index) => {
@@ -865,7 +908,12 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
               Math.pow(intersection.x - objPos.x, 2) +
               Math.pow(intersection.z - objPos.z, 2)
             );
-            console.log(`📏 Distance to object ${index}: ${distance.toFixed(2)} units`);
+            
+            // Also show normalized object position
+            const normalizedObjPos = normalizeCoordinates(objPos.x, objPos.y, objPos.z);
+            const colors = ['Red', 'Green', 'Blue'];
+            console.log(`📏 ${colors[index]} object (Object${index + 1}) - Normalized: x=${normalizedObjPos.x.toFixed(3)}, y=${normalizedObjPos.y.toFixed(3)}, z=0.760`);
+            console.log(`📏 Distance to ${colors[index]} object: ${distance.toFixed(2)} units`);
           });
         }
       };
