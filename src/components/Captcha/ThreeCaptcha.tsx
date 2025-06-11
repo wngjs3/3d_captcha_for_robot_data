@@ -19,7 +19,7 @@ class RobotArm {
 
   constructor(world: RAPIER.World) {
     this.world = world;
-    this.radius = 0.2;
+    this.radius = 0.45; // 3cm diameter = 1.5cm radius = 0.45 units
     
     // Create visual cylinder
     const geometry = new THREE.CylinderGeometry(this.radius, this.radius, 0.8, 16);
@@ -248,6 +248,8 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
   }>>([]);
   const recordingStartTimeRef = useRef<number>(0);
   const replayStartTimeRef = useRef<number>(0);
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const frameCountRef = useRef<number>(0);
 
   // Recording and replay functions
   const startRecording = () => {
@@ -261,6 +263,7 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
     
     console.log('🔴 Clearing recording data...');
     recordingDataRef.current = [];
+    frameCountRef.current = 0;
     
     console.log('🔴 Setting start time...');
     recordingStartTimeRef.current = performance.now();
@@ -269,13 +272,30 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
     setIsRecording(true);
     isRecordingRef.current = true;
     
+    // Start fixed 10fps recording interval (0.1s = 100ms)
+    const targetFPS = 10;
+    const frameInterval = 1000 / targetFPS; // 100ms
+    
+    recordingIntervalRef.current = setInterval(() => {
+      if (isRecordingRef.current) {
+        recordFixedFrame();
+      }
+    }, frameInterval);
+    
     console.log('🔴 setIsRecording(true) called - Recording should start now!');
-    console.log('🔴 Recording started');
+    console.log(`🔴 Recording started at fixed ${targetFPS}fps (${frameInterval}ms intervals)`);
   };
 
   const stopRecording = () => {
     setIsRecording(false);
     isRecordingRef.current = false;
+    
+    // Clear the recording interval
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+    
     const frameCount = recordingDataRef.current.length;
     console.log('⏹️ Recording stopped. Frames:', frameCount);
     console.log('🎬 Recording data:', recordingDataRef.current.slice(0, 3)); // Show first 3 frames
@@ -331,6 +351,63 @@ const ThreeCaptcha: React.FC<ThreeCaptchaProps> = ({ onVerify }) => {
     document.body.removeChild(downloadLink);
     
     console.log('💾 Canvas image saved locally');
+  };
+
+  // Save recording data as CSV
+  const saveRecordingAsCSV = () => {
+    if (!hasRecording || recordingDataRef.current.length === 0) {
+      alert('No recording data available to save!');
+      return;
+    }
+
+    console.log('📊 Converting recording data to CSV...');
+    
+    // Get the first frame to determine object count
+    const firstFrame = recordingDataRef.current[0];
+    const objectCount = firstFrame.objects.length;
+    
+    // Create CSV header
+    let csvHeader = 'Timestamp,RobotArm_X,RobotArm_Y,RobotArm_Z';
+    
+    // Add headers for each object's position and rotation
+    for (let i = 0; i < objectCount; i++) {
+      csvHeader += `,Object${i + 1}_Pos_X,Object${i + 1}_Pos_Y,Object${i + 1}_Pos_Z`;
+      csvHeader += `,Object${i + 1}_Rot_X,Object${i + 1}_Rot_Y,Object${i + 1}_Rot_Z,Object${i + 1}_Rot_W`;
+    }
+    
+    // Convert data to CSV rows
+    const csvRows = recordingDataRef.current.map(frame => {
+      let row = `${frame.timestamp.toFixed(3)},${frame.robotArm.x.toFixed(6)},${frame.robotArm.y.toFixed(6)},${frame.robotArm.z.toFixed(6)}`;
+      
+      // Add object data
+      frame.objects.forEach(obj => {
+        row += `,${obj.position.x.toFixed(6)},${obj.position.y.toFixed(6)},${obj.position.z.toFixed(6)}`;
+        row += `,${obj.rotation.x.toFixed(6)},${obj.rotation.y.toFixed(6)},${obj.rotation.z.toFixed(6)},${obj.rotation.w.toFixed(6)}`;
+      });
+      
+      return row;
+    });
+    
+    // Combine header and data
+    const csvContent = [csvHeader, ...csvRows].join('\n');
+    
+    // Create and download CSV file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const downloadLink = document.createElement('a');
+    downloadLink.href = url;
+    downloadLink.download = `captcha-recording-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    
+    // Trigger download
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+    
+    // Clean up the URL object
+    URL.revokeObjectURL(url);
+    
+    console.log(`💾 Recording data saved as CSV: ${recordingDataRef.current.length} frames, ${objectCount} objects`);
   };
 
   // Gemini verification function
@@ -447,49 +524,85 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
     }
   };
 
-  // Record current state
-  const recordFrame = () => {
-    // Debug: Always log when this function is called
-    if (recordingDataRef.current.length === 0 && isRecordingRef.current) {
-      console.log('🎬 recordFrame called - isRecording:', isRecordingRef.current, 'robotArmRef:', !!robotArmRef.current, 'objectsRef:', !!objectsRef.current);
-    }
+  // Coordinate normalization function
+  const normalizeCoordinates = (x: number, y: number, z: number) => {
+    // Real-world scale mapping:
+    // Three.js: 6x6 unit table → Real world: 20x20cm table
+    // Three.js: 0.75 unit cubes → Real world: 2.5x2.5cm cubes
     
-    if (!isRecordingRef.current) {
-      return; // Silent return when not recording
-    }
+    // Three.js coordinate ranges:
+    // X: -3 to 3 (6 unit table width)  
+    // Z: -3 to 3 (6 unit table depth)
     
+    // Target coordinate ranges (real world units in meters):
+    // X: 0.2 to 0.40 (20cm range, back to front)
+    // Y: -0.20 to 0.20 (40cm range total, left to right, was Z axis)
+    
+    const normalizedX = 0.2 + ((x + 3) / 6) * (0.40 - 0.2); // -3~3 → 0.2~0.40 (20cm)
+    const normalizedY = -0.20 + ((z + 3) / 6) * (0.20 - (-0.20)); // -3~3 → -0.20~0.20 (40cm total)
+    
+    return {
+      x: Math.max(0.2, Math.min(0.40, normalizedX)),
+      y: Math.max(-0.20, Math.min(0.20, normalizedY))
+    };
+  };
+
+  // Record current state with fixed timestamp
+  const recordFixedFrame = () => {
     if (!robotArmRef.current || !objectsRef.current) {
       console.log('❌ Missing refs for recording');
       return;
     }
 
-    const currentTime = performance.now() - recordingStartTimeRef.current;
+    // Use fixed frame timing: frame number * 100ms (10fps)
+    const fixedTimestamp = frameCountRef.current * (1000 / 10);
     const robotPos = robotArmRef.current.position;
     
-    const objectStates = objectsRef.current.map(obj => ({
-      position: {
-        x: obj.mesh.position.x,
-        y: obj.mesh.position.y,
-        z: obj.mesh.position.z
-      },
-      rotation: {
-        x: obj.mesh.quaternion.x,
-        y: obj.mesh.quaternion.y,
-        z: obj.mesh.quaternion.z,
-        w: obj.mesh.quaternion.w
-      }
-    }));
+    // Normalize robot arm coordinates
+    const normalizedRobotPos = normalizeCoordinates(robotPos.x, robotPos.y, robotPos.z);
+    
+    const objectStates = objectsRef.current.map(obj => {
+      // Normalize object coordinates
+      const normalizedObjPos = normalizeCoordinates(obj.mesh.position.x, obj.mesh.position.y, obj.mesh.position.z);
+      
+      return {
+        position: {
+          x: normalizedObjPos.x,  // Normalized X (0.2~0.40)
+          y: normalizedObjPos.y,  // Normalized Y (was Z, -0.20~0.20)
+          z: obj.mesh.position.y  // Keep original Y as Z (height)
+        },
+        rotation: {
+          x: obj.mesh.quaternion.x,
+          y: obj.mesh.quaternion.z, // Y와 Z 교환  
+          z: obj.mesh.quaternion.y,
+          w: obj.mesh.quaternion.w
+        }
+      };
+    });
 
     recordingDataRef.current.push({
-      timestamp: currentTime,
-      robotArm: { x: robotPos.x, y: robotPos.y, z: robotPos.z },
+      timestamp: fixedTimestamp,
+      robotArm: { 
+        x: normalizedRobotPos.x,  // Normalized X (0.2~0.40)
+        y: normalizedRobotPos.y,  // Normalized Y (was Z, -0.20~0.20)
+        z: 1.0                    // Fixed Z value
+      },
       objects: objectStates
     });
 
-    // Log every 60 frames (roughly every second at 60fps)
-    if (recordingDataRef.current.length % 60 === 0) {
-      console.log(`📹 Recording... ${recordingDataRef.current.length} frames`);
+    frameCountRef.current++;
+
+    // Log every 10 frames (exactly every second at 10fps)
+    if (frameCountRef.current % 10 === 0) {
+      console.log(`📹 Recording... ${frameCountRef.current} frames (${(fixedTimestamp / 1000).toFixed(1)}s)`);
     }
+  };
+
+  // Legacy record frame (for non-recording usage)
+  const recordFrame = () => {
+    // This is now only used for non-recording animation loops
+    // The actual recording uses recordFixedFrame with setInterval
+    return;
   };
 
   // Replay frame
@@ -626,8 +739,9 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
         let colliderDesc: RAPIER.ColliderDesc;
         let objectRadius: number;
         
-        // Create uniform sized cubes
-        const size = 0.4; // Fixed size for all cubes
+        // Create uniform sized cubes (2.5cm in 20cm table = 12.5% ratio)
+        // Table is 6 units, so cube should be 6 * 0.125 = 0.75 units
+        const size = 0.75; // Real scale: 2.5cm cubes on 20cm table
         geometry = new THREE.BoxGeometry(size, size, size);
         colliderDesc = RAPIER.ColliderDesc.cuboid(size/2, size/2, size/2);
         objectRadius = size * 1.2; // Reasonable safety radius
@@ -950,6 +1064,17 @@ Please respond with only "VERIFIED" or "NOT_VERIFIED" - no additional explanatio
           disabled={isRecording || isReplaying || isVerifying}
         >
           📸 Save Screenshot
+        </ControlButton>
+        
+        <ControlButton
+          $variant="secondary"
+          onClick={() => {
+            console.log('📊 Save CSV button clicked!');
+            saveRecordingAsCSV();
+          }}
+          disabled={!hasRecording || isRecording || isReplaying || isVerifying}
+        >
+          📊 Save CSV {hasRecording ? '(Ready)' : '(No Data)'}
         </ControlButton>
         
         {isRecording && <StatusIndicator $isActive={true} />}
